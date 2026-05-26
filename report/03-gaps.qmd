@@ -1,0 +1,282 @@
+---
+title: "C/D. Déficit pays × langue et trous des deux côtés"
+subtitle: "Où concentrer l'effort de traduction ? Quels tags ajouter ou retirer ?"
+---
+
+```{python}
+#| label: setup
+#| include: false
+import sys
+from pathlib import Path
+ROOT = Path.cwd().parent if Path.cwd().name == "report" else Path.cwd()
+sys.path.insert(0, str(ROOT))
+
+import polars as pl
+import plotly.express as px
+import plotly.graph_objects as go
+
+CACHE = ROOT / "data" / "cache"
+```
+
+## C. Déficit de traduction pays × langue
+
+::: {.callout-note}
+**L'idée :** pour chaque pays, on regarde **uniquement** les catégories
+réellement utilisées par les produits qui y sont vendus, puis on demande :
+*pour chaque langue officielle du pays, combien de ces catégories ont une
+traduction ?* Une catégorie sans traduction = l'utilisateur local voit
+l'identifiant anglais (`en:lemon-balm`) plutôt qu'un mot dans sa langue.
+:::
+
+```{python}
+#| label: deficit-cat
+deficit = pl.read_parquet(CACHE / "c_deficit_cat.parquet")
+deficit.head(20)
+```
+
+### Heatmap pays × langue (catégories)
+
+```{python}
+#| label: deficit-heatmap
+df = deficit.to_pandas()
+order = df.groupby("country")["pct_deficit"].max().sort_values(ascending=False).index.tolist()
+piv = df.pivot(index="country", columns="lang", values="pct_deficit").reindex(order)
+
+fig = px.imshow(
+    piv.values,
+    x=piv.columns, y=piv.index,
+    color_continuous_scale="Reds",
+    aspect="auto",
+    labels=dict(color="% non traduit"),
+    title="Déficit de traduction — pays (lignes) × langue officielle (colonnes)",
+)
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=600)
+fig
+```
+
+::: {.callout-note}
+**Comment lire cette heatmap ?** Chaque ligne = un pays, chaque colonne =
+une langue officielle de ce pays. Plus la case est rouge, plus le déficit
+est élevé. Un blanc/gris = la langue n'est pas officielle dans ce pays
+(donc pas évaluée). Les cases vides sont normales.
+:::
+
+### Top 20 couples (pays, langue) les plus déficitaires
+
+```{python}
+#| label: top-deficit
+top = deficit.sort("pct_deficit", descending=True).head(20).to_pandas()
+top["label"] = top["country"].str.replace("en:", "") + " — " + top["lang"]
+fig = px.bar(
+    top, y="label", x="pct_deficit", orientation="h",
+    hover_data=["n_entries_used", "n_translated", "n_missing"],
+    labels={"label": "", "pct_deficit": "% entrées non traduites"},
+    title="Top 20 (pays × langue) les plus mal couverts",
+)
+fig.update_traces(marker_color="#c0504d")
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=600, yaxis=dict(autorange="reversed"))
+fig
+```
+
+::: {.callout-important}
+**Ce que ces chiffres veulent dire**
+
+- **Suisse / Romanche (`rm`) — 99,96 %** : sur les milliers de catégories
+  utilisées pour des produits vendus en Suisse, **seules 2** ont une
+  traduction romanche dans la taxonomie. Idem **Luxembourgeois** au
+  Luxembourg.
+- **Espagne / Galicien (`gl`), Basque (`eu`), Catalan (`ca`)** : 90-99 %
+  de déficit, alors que ce sont des langues co-officielles.
+- **Irlande / Irlandais (`ga`)** : 99 % de déficit pour la langue
+  officielle.
+
+Ces chiffres ne sont **pas un échec** : ils montrent **où une heure de
+traduction communautaire aurait le plus d'impact**.
+:::
+
+::: {.callout-note appearance="simple"}
+**Note sur les ingrédients :** la métrique C ingrédients (40 tags par
+produit × 48 pays × explode taxonomie) excède la RAM du précompute. Elle
+est calculée séparément via Superset/DuckDB (cf. [Bridge Superset](04-superset.qmd)).
+:::
+
+---
+
+## D1. Catégories « mortes » — définies mais jamais utilisées
+
+::: {.callout-note}
+**L'idée :** la taxonomie OFF compte **14 437 catégories**. Combien sont
+réellement utilisées par au moins un produit ? Les autres sont des
+candidates à un audit : vraies obsolètes, ou trop spécifiques pour avoir
+des produits en base.
+:::
+
+```{python}
+#| label: d1-summary
+summary = pl.read_parquet(CACHE / "d1_summary_cat.parquet").row(0, named=True)
+total = summary["n_total"]
+used = summary["n_used"]
+unused = summary["n_unused"]
+pct = summary["pct_used"]
+
+fig = go.Figure(go.Bar(
+    x=["Utilisées au moins une fois", "Jamais utilisées"],
+    y=[used, unused],
+    text=[f"{used:,} ({pct:.0f} %)".replace(",", " "), f"{unused:,} ({100-pct:.0f} %)".replace(",", " ")],
+    textposition="outside",
+    marker_color=["#3b6fb6", "#c0504d"],
+))
+fig.update_layout(
+    title=f"Sur les {total:,} catégories de la taxonomie, combien sont vivantes ?".replace(",", " "),
+    margin=dict(l=10, r=10, t=50, b=10), height=380, showlegend=False,
+)
+fig
+```
+
+::: {.callout-tip}
+**Ce que ça veut dire :** environ **1 catégorie sur 3** n'a jamais été
+posée sur un produit. Certaines sont normales (concepts très spécifiques,
+labels protégés), d'autres mériteraient un nettoyage.
+:::
+
+### Top 20 catégories mortes **les plus traduites**
+
+Ces entrées ont eu beaucoup d'effort de traduction (souvent 20+ langues),
+sans qu'aucun produit ne les utilise. C'est du **travail bénévole orphelin**.
+
+```{python}
+#| label: d1-top
+dead = pl.read_parquet(CACHE / "d1_dead_cat.parquet").head(20).to_pandas()
+fig = px.bar(
+    dead, y="id", x="n_languages", orientation="h",
+    hover_data=["has_wikidata", "is_protected_name", "n_children", "n_parents"],
+    labels={"id": "Catégorie", "n_languages": "Langues traduites"},
+    title="Top 20 catégories mortes (jamais utilisées) classées par effort de traduction",
+)
+fig.update_traces(marker_color="#e8a33d")
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=600, yaxis=dict(autorange="reversed"))
+fig
+```
+
+---
+
+## D2. Tags inconnus — utilisés par les contributeurs mais absents
+
+::: {.callout-note}
+**L'idée :** symétrique de D1. Cette fois les contributeurs utilisent un
+tag (par exemple `en:groceries`) qui **n'existe pas** dans la taxonomie.
+Soit le tag est utile et il faut l'ajouter, soit il signale un mode de
+saisie incorrect.
+:::
+
+### Top 30 tags inconnus — toutes données confondues
+
+```{python}
+#| label: d2-global
+unk_cat = pl.read_parquet(CACHE / "d2_unknown_cat.parquet").head(30)
+unk_cat
+```
+
+### 🎛️ Explorer pays par pays (interactif)
+
+Choisis un pays dans le menu déroulant pour voir **ses** tags inconnus —
+ceux que ses contributeurs ont utilisés sans qu'ils existent dans la
+taxonomie.
+
+```{python}
+#| label: d2-dropdown
+per_country_df = pl.read_parquet(CACHE / "d2_unknown_by_country.parquet").to_pandas()
+country_keys = list(per_country_df["country"].unique())
+
+fig = go.Figure()
+for i, c in enumerate(country_keys):
+    df = per_country_df[per_country_df["country"] == c]
+    fig.add_trace(go.Bar(
+        y=df["tag"].tolist(),
+        x=df["n_products"].tolist(),
+        orientation="h",
+        marker_color="#c0504d",
+        name=c.replace("en:", ""),
+        visible=(i == 0),
+        hovertemplate="<b>%{y}</b><br>%{x:,} produits<extra></extra>",
+    ))
+
+buttons = []
+for i, c in enumerate(country_keys):
+    visibility = [j == i for j in range(len(country_keys))]
+    buttons.append(dict(
+        label=c.replace("en:", "").replace("-", " ").title(),
+        method="update",
+        args=[
+            {"visible": visibility},
+            {"title": f"Top 20 catégories inconnues — {c.replace('en:', '')}"},
+        ],
+    ))
+
+fig.update_layout(
+    title=f"Top 20 catégories inconnues — {country_keys[0].replace('en:', '')}",
+    updatemenus=[dict(
+        type="dropdown",
+        buttons=buttons,
+        x=1.0, xanchor="right",
+        y=1.15, yanchor="top",
+        showactive=True,
+    )],
+    margin=dict(l=10, r=10, t=80, b=10),
+    height=600,
+    yaxis=dict(autorange="reversed"),
+    xaxis_title="Nombre de produits utilisant ce tag (dans le pays)",
+)
+fig
+```
+
+::: {.callout-tip}
+**Comment l'utiliser :** clique sur le menu en haut à droite du graphique
+et choisis un pays. Le graphe se met à jour avec **les** 20 tags
+inconnus les plus utilisés **dans ce pays uniquement**.
+:::
+
+### Vue globale en bar — catégories
+
+```{python}
+#| label: d2-global-viz
+top = unk_cat.head(20).to_pandas()
+fig = px.bar(
+    top, y="tag", x="n_occurrences", orientation="h",
+    hover_data=["n_countries", "top_country", "lang_prefix"],
+    color="lang_prefix",
+    labels={"tag": "Tag inconnu", "n_occurrences": "Produits concernés"},
+    title="Top 20 catégories inconnues — fréquence d'usage globale",
+)
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=550, yaxis=dict(autorange="reversed"))
+fig
+```
+
+::: {.callout-note appearance="simple"}
+**Ingrédients inconnus :** non calculé en local (RAM), à explorer via la
+[requête SQL Superset équivalente](04-superset.qmd) sur DuckDB.
+:::
+
+---
+
+## Recommandations actionnables
+
+::: {.callout-important}
+## Pour l'équipe OFF / la communauté
+
+1. **Combler les langues minoritaires d'Europe** (C) — romanche,
+   luxembourgeois, basque, galicien, catalan, irlandais. Quelques centaines
+   d'entrées suffisent à couvrir l'essentiel des produits réellement
+   vendus.
+2. **Ajouter les catégories `en:groceries`, `en:salted-snacks`,
+   `en:toppings-ingredients`** à la taxonomie (D2) — elles sont déjà
+   utilisées par des dizaines de milliers de produits.
+3. **Investiguer `en:undefined`** (D2) : 35 000 produits taggés ainsi —
+   signal d'un problème de saisie côté contributeurs ou d'un bug d'import.
+4. **Auditer les 5 005 catégories mortes** (D1) — en particulier les
+   entrées traduites dans 30+ langues qui ne servent à rien (effort
+   bénévole perdu). Exemple : `en:carambola` traduite en 65 langues, zéro
+   produit l'utilise.
+5. **Encourager l'étiquetage au Japon** (B1) : 39 000 produits, seulement
+   8 % catégorisés. Levier communautaire avant tout.
+:::

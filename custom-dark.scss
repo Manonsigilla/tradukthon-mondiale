@@ -1,0 +1,28 @@
+/*-- scss:defaults --*/
+
+$primary: #5a9bd8;
+$body-bg: #181c24;
+$body-color: #e6e8ec;
+$link-color: #7eb5e8;
+$navbar-bg: #14171f;
+
+/*-- scss:rules --*/
+
+.callout {
+  border-radius: .5rem;
+}
+
+h1, h2, h3 {
+  letter-spacing: -.01em;
+}
+
+.quarto-title-block .subtitle {
+  color: #aaa;
+  font-weight: 300;
+}
+
+/* tables polars/pandas rendues avec fond clair par défaut → on adoucit */
+table.dataframe {
+  background: transparent !important;
+  color: inherit;
+}

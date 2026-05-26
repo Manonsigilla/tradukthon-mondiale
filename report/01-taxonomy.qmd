@@ -1,0 +1,153 @@
+---
+title: "A. La taxonomie OFF"
+subtitle: "Combien d'entrées ? Quelles langues ? À quel point est-elle internationale ?"
+---
+
+```{python}
+#| label: setup
+#| include: false
+import sys
+from pathlib import Path
+ROOT = Path.cwd().parent if Path.cwd().name == "report" else Path.cwd()
+sys.path.insert(0, str(ROOT))
+
+import polars as pl
+import plotly.express as px
+import plotly.graph_objects as go
+
+from src.taxonomy import load_and_parse, stats_summary, language_coverage, entries_completeness
+
+RAW = ROOT / "data" / "raw"
+```
+
+```{python}
+#| label: load
+cat_entries, cat_labels = load_and_parse(RAW / "categories.full.json")
+
+ing_path = RAW / "ingredients.full.json"
+HAS_ING = ing_path.exists()
+if HAS_ING:
+    ing_entries, ing_labels = load_and_parse(ing_path)
+    entries = pl.concat([cat_entries, ing_entries])
+    labels = pl.concat([cat_labels, ing_labels])
+else:
+    entries, labels = cat_entries, cat_labels
+```
+
+## Vue d'ensemble
+
+```{python}
+#| label: kpis
+stats_cat = stats_summary(cat_entries, cat_labels)
+if HAS_ING:
+    stats_ing = stats_summary(ing_entries, ing_labels)
+
+def kpi_card(label, value):
+    return f"""<div style='display:inline-block;padding:1rem 1.5rem;margin:.4rem;border-radius:.5rem;background:#f4f6fa;min-width:160px'>
+  <div style='font-size:.85rem;color:#666;text-transform:uppercase;letter-spacing:.04em'>{label}</div>
+  <div style='font-size:1.6rem;font-weight:600;color:#1f3a5f'>{value}</div>
+</div>"""
+
+from IPython.display import HTML
+html = "<div>"
+html += kpi_card("Catégories", f"{stats_cat['n_entries']:,}".replace(",", " "))
+if HAS_ING:
+    html += kpi_card("Ingrédients", f"{stats_ing['n_entries']:,}".replace(",", " "))
+html += kpi_card("Langues (catégories)", stats_cat["n_languages"])
+html += kpi_card("Labels totaux", f"{stats_cat['n_labels_total'] + (stats_ing['n_labels_total'] if HAS_ING else 0):,}".replace(",", " "))
+html += kpi_card("Langues/entrée (moy.)", f"{stats_cat['avg_languages_per_entry']:.1f}")
+html += "</div>"
+HTML(html)
+```
+
+::: {.callout-note}
+Une **entrée canonique** est un concept (ex. `en:lemon-balm`). Elle peut être traduite dans plusieurs langues, chaque traduction pouvant comporter un **label canonique** et des **synonymes**.
+:::
+
+## Métrique A — Complétude de la taxonomie par langue
+
+Cette page répond à la **première question** de l'analyse : indépendamment
+des produits, quelle est la qualité de la taxonomie elle-même ?
+
+### Combien d'entrées sont traduites dans chaque langue ?
+
+Pour chacune des langues, on compte **le nombre de catégories** qui y sont
+traduites (au moins un libellé existe).
+
+```{python}
+#| label: lang-coverage
+cov = language_coverage(cat_labels).head(25).to_pandas()
+fig = px.bar(
+    cov,
+    x="lang", y="n_entries_covered",
+    text="n_entries_covered",
+    hover_data={"pct_coverage": ":.1f", "n_labels_total": True, "n_entries_covered": ":,"},
+    labels={"n_entries_covered": "Catégories traduites", "lang": "Langue"},
+    title="Top 25 langues — nombre de catégories traduites",
+)
+fig.update_traces(marker_color="#3b6fb6",
+                  texttemplate="%{text:,}", textposition="outside", cliponaxis=False)
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=460,
+                  yaxis_title="Nombre de catégories traduites")
+fig
+```
+
+::: {.callout-note}
+**Comment lire ce graphique ?** Chaque barre = une langue. La hauteur = le
+nombre de catégories qui ont au moins une traduction dans cette langue, sur
+les **14 437** catégories au total. Plus la barre est haute, mieux la langue
+est couverte.
+:::
+
+### La taxonomie est-elle vraiment multilingue ?
+
+Une catégorie peut être traduite dans **beaucoup** de langues ou seulement
+dans **une ou deux**. Cette section répond à la question : *quelle part de la
+taxonomie est réellement internationale ?*
+
+```{python}
+#| label: completeness-buckets
+comp = entries_completeness(cat_labels)
+
+def bucket(n):
+    if n == 1: return "1 langue (monolingue)"
+    if n <= 3: return "2 à 3 langues"
+    if n <= 9: return "4 à 9 langues"
+    return "10 langues et +"
+
+bucket_order = ["1 langue (monolingue)", "2 à 3 langues", "4 à 9 langues", "10 langues et +"]
+df = (
+    comp.with_columns(
+        pl.col("n_langs").map_elements(bucket, return_dtype=pl.String).alias("bucket")
+    )
+    .group_by("bucket")
+    .agg(pl.len().alias("n_entries"))
+    .to_pandas()
+)
+df = df.set_index("bucket").reindex(bucket_order).reset_index()
+df["pct"] = df["n_entries"] / df["n_entries"].sum() * 100
+
+fig = px.bar(
+    df, x="bucket", y="n_entries",
+    text=[f"{n:,}<br>({p:.0f} %)" for n, p in zip(df["n_entries"], df["pct"])],
+    labels={"bucket": "Combien de langues couvre cette catégorie ?", "n_entries": "Nombre de catégories"},
+    title="La majorité des catégories ne sont traduites que dans peu de langues",
+    color="bucket",
+    color_discrete_sequence=["#c0504d", "#e8a33d", "#7ea7d8", "#1f3a5f"],
+)
+fig.update_traces(textposition="outside", cliponaxis=False)
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=440, showlegend=False)
+fig
+```
+
+::: {.callout-tip}
+**Lecture** : sur les 14 437 catégories, une **petite minorité** est réellement
+multilingue (10 langues ou plus). C'est cette partie-là qui pourrait servir
+d'exemple pour traduire le reste.
+:::
+
+::: {.callout-tip}
+## À suivre
+- [Couverture par pays](02-coverage.qmd) — croisement avec les produits OFF
+- [Trous & actions](03-gaps.qmd) — déficit pays×langue et tags inconnus
+:::

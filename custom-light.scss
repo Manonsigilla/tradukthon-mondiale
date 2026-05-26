@@ -1,0 +1,22 @@
+/*-- scss:defaults --*/
+
+$primary: #1f3a5f;
+$body-bg: #fcfcfd;
+$body-color: #1c1f26;
+$link-color: #1f6fb6;
+$navbar-bg: #ffffff;
+
+/*-- scss:rules --*/
+
+.callout {
+  border-radius: .5rem;
+}
+
+h1, h2, h3 {
+  letter-spacing: -.01em;
+}
+
+.quarto-title-block .subtitle {
+  color: #555;
+  font-weight: 300;
+}

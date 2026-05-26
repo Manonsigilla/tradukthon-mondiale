@@ -1,0 +1,64 @@
+---
+title: "Couverture des taxonomies Open Food Facts"
+subtitle: "Mesurer ce qu'on traduit, où on traduit, et ce qu'il manque"
+author: "Hackathon OFF"
+---
+
+## Pourquoi ce rapport ?
+
+Open Food Facts maintient des **taxonomies multilingues** (catégories, ingrédients, additifs…)
+qui servent à structurer les produits et à les afficher dans les centaines de langues parlées
+par sa communauté.
+
+Mais aujourd'hui, **personne ne mesure** vraiment :
+
+- Quelle est la couverture par pays ?
+- Quelle est la complétude multilingue de chaque entrée ?
+- Y a-t-il un déficit de traduction pour les langues effectivement parlées dans les pays
+  où des produits sont scannés ?
+- Quels tags sont utilisés par les contributeurs mais n'existent pas (encore) dans la taxonomie ?
+
+Ce rapport répond à ces quatre questions, à partir de :
+
+1. **L'export des taxonomies** (`*.full.json`) publiés par OFF
+2. **L'export des produits** au format Parquet (≈ 4 M produits)
+
+## La grille d'analyse en 4 questions
+
+| | Question | Page |
+|---|---|---|
+| **A** | La taxonomie elle-même est-elle bien traduite dans chaque langue ? | [Taxonomie](01-taxonomy.qmd) |
+| **B1** | Les produits d'un pays sont-ils **étiquetés** par les contributeurs ? | [Couverture pays](02-coverage.qmd) |
+| **B2** | Quand ils le sont, les tags utilisés sont-ils **reconnus** par la taxonomie ? | [Couverture pays](02-coverage.qmd) |
+| **C** | Pour un produit vendu dans un pays, ses catégories sont-elles **traduisibles** dans la langue locale ? | [Trous & actions](03-gaps.qmd) |
+| **D1** | Quelles entrées de la taxonomie ne sont **jamais utilisées** par aucun produit ? | [Trous & actions](03-gaps.qmd) |
+| **D2** | Quels tags sont utilisés par les contributeurs mais **absents** de la taxonomie ? | [Trous & actions](03-gaps.qmd) |
+
+## Bonus : un dashboard Superset prêt à l'emploi
+
+Ce rapport Quarto est complété par un [**bridge vers Apache Superset**](04-superset.qmd) :
+les 6 mêmes métriques sont transposées en SQL DuckDB pour
+[sql.openfoodfacts.org](https://sql.openfoodfacts.org), avec un guide
+pas-à-pas pour qu'un contributeur **non-technique** puisse les rejouer et
+filtrer en un clic. La méthodologie vit dans Quarto, l'opérationnel vit
+dans Superset.
+
+## Stack
+
+| Outil | Usage |
+|---|---|
+| **Polars** (lazy) | Lecture du Parquet 2+ Go avec projection des seules colonnes utiles |
+| **Quarto** | Notebook reproductible, site multi-pages |
+| **Plotly** | Visualisations interactives (cartes choroplèthes, heatmaps) |
+| **pycountry / babel** | Langues officielles par pays |
+
+## Reproductibilité
+
+```bash
+pip install -e .
+python scripts/download_data.py           # taxonomies + parquet
+quarto render
+```
+
+Toutes les données brutes sont téléchargées dans `data/raw/` ; le rapport est entièrement
+reproductible à partir des sources OFF publiques.

@@ -1,0 +1,40 @@
+project:
+  type: website
+  output-dir: _site
+  render:
+    - "report/*.qmd"
+
+website:
+  title: "OFF Taxonomy Coverage"
+  description: "Couverture et complétude des taxonomies Open Food Facts par pays et langue"
+  navbar:
+    left:
+      - href: report/index.qmd
+        text: Accueil
+      - href: report/01-taxonomy.qmd
+        text: "A. Taxonomie"
+      - href: report/02-coverage.qmd
+        text: "B. Couverture pays"
+      - href: report/03-gaps.qmd
+        text: "C / D. Trous & actions"
+      - href: report/04-superset.qmd
+        text: "Bridge Superset"
+
+format:
+  html:
+    theme:
+      light: [cosmo, custom-light.scss]
+      dark: [darkly, custom-dark.scss]
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-tools: true
+    fig-width: 10
+    fig-height: 6
+    embed-resources: false
+
+execute:
+  freeze: auto
+  warning: false
+
+jupyter: python3

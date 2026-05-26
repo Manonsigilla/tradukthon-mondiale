@@ -1,0 +1,194 @@
+---
+title: "B. Couverture des produits par pays"
+subtitle: "Les produits sont-ils étiquetés ? Avec des tags reconnus ?"
+---
+
+```{python}
+#| label: setup
+#| include: false
+import sys
+from pathlib import Path
+ROOT = Path.cwd().parent if Path.cwd().name == "report" else Path.cwd()
+sys.path.insert(0, str(ROOT))
+
+import polars as pl
+import plotly.express as px
+
+CACHE = ROOT / "data" / "cache"
+```
+
+::: {.callout-note}
+Cette page décompose la **couverture par pays** en deux questions
+complémentaires :
+
+- **B1** : un produit vendu dans le pays est-il **étiqueté** avec au moins
+  une catégorie ?
+- **B2** : si oui, ses tags sont-ils **reconnus** par la taxonomie ou
+  inventés par le contributeur ?
+
+Un pays peut être bon sur B1 et mauvais sur B2 (ou l'inverse) : ce sont deux
+phénomènes différents.
+:::
+
+## Combien de produits par pays ?
+
+```{python}
+#| label: by-country
+by_country = pl.read_parquet(CACHE / "products_by_country.parquet")
+top = by_country.head(25).to_pandas()
+fig = px.bar(
+    top, x="countries_tags", y="n_products",
+    labels={"countries_tags": "Pays", "n_products": "Produits"},
+    title="Top 25 pays par nombre de produits OFF",
+)
+fig.update_traces(marker_color="#1f3a5f")
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=420)
+fig
+```
+
+::: {.callout-note}
+**Comment lire ce graphique ?** Chaque barre = un pays. La hauteur = le
+nombre total de produits enregistrés dans OFF associés à ce pays. La France
+domine, c'est attendu (l'association est française), suivie des États-Unis.
+:::
+
+## B1 — Taux d'étiquetage des produits
+
+**Question :** sur tous les produits d'un pays, quel pourcentage a **au
+moins une** catégorie renseignée par les contributeurs ?
+
+```{python}
+#| label: b1-rate
+rate = pl.read_parquet(CACHE / "b1_labeling_rate.parquet")
+rate.head(10)
+```
+
+### Carte mondiale du taux d'étiquetage
+
+```{python}
+#| label: b1-map
+d = rate.filter(pl.col("iso3").is_not_null()).to_pandas()
+fig = px.choropleth(
+    d, locations="iso3", color="pct_tagged",
+    hover_name="country",
+    hover_data={"n_products_total": ":,", "n_products_tagged": ":,", "pct_tagged": ":.1f", "iso3": False},
+    color_continuous_scale="RdYlGn",
+    range_color=(0, 70),
+    labels={"pct_tagged": "% étiquetés"},
+    title="<b>B1.</b> % de produits ayant au moins une catégorie renseignée",
+)
+fig.update_layout(margin=dict(l=0, r=0, t=50, b=0), height=550,
+                  geo=dict(showframe=False, projection_type="natural earth"))
+fig
+```
+
+::: {.callout-note}
+**Comment lire ce graphique ?** Plus un pays est **vert**, plus la
+proportion de produits étiquetés par les contributeurs y est élevée. Plus il
+est **rouge**, plus les contributeurs y laissent les produits sans
+catégorie. Survoler un pays pour voir le détail.
+:::
+
+### Pays les **moins** étiquetés
+
+```{python}
+#| label: b1-worst
+worst = rate.sort("pct_tagged").head(15).to_pandas()
+fig = px.bar(
+    worst, x="country", y="pct_tagged",
+    hover_data=["n_products_total", "n_products_tagged"],
+    labels={"country": "Pays", "pct_tagged": "% produits étiquetés"},
+    title="15 pays avec le taux d'étiquetage le plus faible",
+)
+fig.update_traces(marker_color="#c0504d")
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=440)
+fig
+```
+
+::: {.callout-tip}
+**Ce que ça veut dire :** dans ces pays, la majorité des produits scannés
+ne sont **pas catégorisés**, même quand la taxonomie aurait pu les
+accueillir. C'est un signal **communautaire** (pas assez de contributeurs
+locaux) plus que taxonomique. Cas le plus frappant : le **Japon** — près de
+40 000 produits, mais seulement ~8 % étiquetés.
+:::
+
+## B2 — Qualité des tags étiquetés
+
+**Question :** parmi les produits qui ont des catégories, quel pourcentage
+de leurs tags est **canonique** (= reconnu par la taxonomie OFF) ?
+
+```{python}
+#| label: b2-cov
+cov_cat = pl.read_parquet(CACHE / "b2_canonical_cat.parquet")
+cov_cat.head(10)
+```
+
+### Carte mondiale — qualité des tags **catégories**
+
+```{python}
+#| label: b2-map-cat
+d = cov_cat.filter(pl.col("iso3").is_not_null()).to_pandas()
+fig = px.choropleth(
+    d, locations="iso3", color="pct_canonical",
+    hover_name="country",
+    hover_data={"n_products": ":,", "pct_canonical": ":.2f", "iso3": False},
+    color_continuous_scale="RdYlGn",
+    range_color=(80, 100),
+    labels={"pct_canonical": "% canoniques"},
+    title="<b>B2.</b> % de tags catégories reconnus par la taxonomie",
+)
+fig.update_layout(margin=dict(l=0, r=0, t=50, b=0), height=550,
+                  geo=dict(showframe=False, projection_type="natural earth"))
+fig
+```
+
+::: {.callout-note}
+**Comment lire ce graphique ?** Cette carte ne porte **que** sur les
+produits étiquetés (ceux comptés en B1). Plus le pays est vert, plus les
+tags y sont propres ; plus il est rouge, plus les contributeurs y ont
+inventé des tags hors taxonomie.
+:::
+
+::: {.callout-note appearance="simple"}
+**Note sur les ingrédients :** sur le dataset complet (~4 M produits × ~40
+ingrédients chacun), la métrique B2 ingrédients dépasse la RAM du run de
+calcul. Elle est intentionnellement non affichée ici. La même question est
+abordée dans Superset (cf. [Bridge Superset](04-superset.qmd)) où DuckDB
+gère mieux le double-explode pays × ingrédients en streaming.
+:::
+
+### Pays avec le plus de tags hors taxonomie
+
+```{python}
+#| label: b2-worst
+worst = cov_cat.sort("pct_canonical").head(15).to_pandas()
+fig = px.bar(
+    worst, x="country", y="pct_canonical",
+    hover_data=["n_products", "n_tag_occurrences", "n_canonical"],
+    labels={"country": "Pays", "pct_canonical": "% canoniques"},
+    title="15 pays avec le plus de tags hors taxonomie (catégories)",
+)
+fig.update_traces(marker_color="#c0504d")
+fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=440)
+fig.update_yaxes(range=[worst["pct_canonical"].min() - 1, 100])
+fig
+```
+
+::: {.callout-tip}
+**Ce que ça veut dire :** un pays avec une couverture B2 basse signale soit
+un problème de saisie côté contributeurs (typos, vocabulaire local non
+mappé), soit un **manque** dans la taxonomie pour ce pays. On regarde
+quels tags exactement dans la page suivante (métrique D2).
+:::
+
+::: {.callout-important}
+## En résumé
+- **B1** dit qui **étiquette** (pression communautaire).
+- **B2** dit qui étiquette **bien** (alignement avec la taxonomie).
+
+Couverture haute en B2 ne veut pas dire taxonomie complète : ça veut dire
+que les contributeurs utilisent des tags connus. La vraie question — *la
+taxonomie est-elle traduisible dans la langue locale ?* — est traitée page
+suivante.
+:::
