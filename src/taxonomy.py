@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable
 
 import polars as pl
 
@@ -30,92 +29,109 @@ def load_taxonomy_json(path: str | Path) -> dict:
         return json.load(f)
 
 
+_ENTRIES_SCHEMA = {
+    "id": pl.String,
+    "taxonomy": pl.String,
+    "prefix": pl.String,
+    "parents": pl.List(pl.String),
+    "n_parents": pl.UInt32,
+    "n_children": pl.UInt32,
+    "n_languages": pl.UInt32,
+    "has_wikidata": pl.Boolean,
+    "is_protected_name": pl.Boolean,
+}
+
+_LABELS_SCHEMA = {
+    "id": pl.String,
+    "taxonomy": pl.String,
+    "lang": pl.String,
+    "label": pl.String,
+    "is_synonym": pl.Boolean,
+}
+
+
+def _build_entry_row(entry_id: str, props: dict, taxonomy_name: str) -> dict:
+    """Build the 'entries' row for one canonical taxonomy concept."""
+    name = props.get("name", {}) or {}
+    synonyms = props.get("synonyms", {}) or {}
+    parents = props.get("parents", []) or []
+    children = props.get("children", []) or []
+    langs = set(name.keys()) | set(synonyms.keys())
+    return {
+        "id": entry_id,
+        "taxonomy": taxonomy_name,
+        "prefix": entry_id.split(":", 1)[0] if ":" in entry_id else "",
+        "parents": list(parents),
+        "n_parents": len(parents),
+        "n_children": len(children),
+        "n_languages": len(langs),
+        "has_wikidata": bool(props.get("wikidata")),
+        "is_protected_name": bool(props.get("protected_name_type")),
+    }
+
+
+def _label_row(entry_id: str, taxonomy_name: str, lang: str, label: str, is_synonym: bool) -> dict:
+    """Build one row of the 'labels' DataFrame. Centralises the row schema."""
+    return {
+        "id": entry_id,
+        "taxonomy": taxonomy_name,
+        "lang": lang,
+        "label": label,
+        "is_synonym": is_synonym,
+    }
+
+
+def _build_label_rows(entry_id: str, props: dict, taxonomy_name: str) -> list[dict]:
+    """Yield all label rows (canonical names + synonyms) for one entry.
+
+    The OFF JSON occasionally returns a list of strings for 'name' instead
+    of a single string — we normalise that here. Synonyms equal to the
+    canonical name for a language are skipped to avoid double-counting.
+    """
+    name = props.get("name", {}) or {}
+    synonyms = props.get("synonyms", {}) or {}
+    rows: list[dict] = []
+
+    # canonical labels: one per language (sometimes a list of strings)
+    for lang, label in name.items():
+        if label is None:
+            continue
+        labels = label if isinstance(label, list) else [label]
+        for lab in labels:
+            rows.append(_label_row(entry_id, taxonomy_name, lang, str(lab), False))
+
+    # synonyms: 0..n per language, deduplicated against the canonical label
+    for lang, syns in synonyms.items():
+        if not syns:
+            continue
+        if isinstance(syns, str):
+            syns = [syns]
+        canonical = name.get(lang)
+        for syn in syns:
+            if syn is None or syn == canonical:
+                continue
+            rows.append(_label_row(entry_id, taxonomy_name, lang, str(syn), True))
+
+    return rows
+
+
 def parse_taxonomy(raw: dict, taxonomy_name: str) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Transforme le dict brut en deux DataFrames polars.
 
     Returns
     -------
-    entries: id, taxonomy, parents (list[str]), n_parents, n_children, n_languages, has_wikidata
+    entries: id, taxonomy, prefix, parents, n_parents, n_children, n_languages,
+             has_wikidata, is_protected_name
     labels:  id, taxonomy, lang, label, is_synonym
     """
     entry_rows: list[dict] = []
     label_rows: list[dict] = []
-
     for entry_id, props in raw.items():
-        name = props.get("name", {}) or {}
-        synonyms = props.get("synonyms", {}) or {}
-        parents = props.get("parents", []) or []
-        children = props.get("children", []) or []
+        entry_rows.append(_build_entry_row(entry_id, props, taxonomy_name))
+        label_rows.extend(_build_label_rows(entry_id, props, taxonomy_name))
 
-        langs = set(name.keys()) | set(synonyms.keys())
-        entry_rows.append(
-            {
-                "id": entry_id,
-                "taxonomy": taxonomy_name,
-                "prefix": entry_id.split(":", 1)[0] if ":" in entry_id else "",
-                "parents": list(parents),
-                "n_parents": len(parents),
-                "n_children": len(children),
-                "n_languages": len(langs),
-                "has_wikidata": bool(props.get("wikidata")),
-                "is_protected_name": bool(props.get("protected_name_type")),
-            }
-        )
-
-        # name: 1 label canonique par langue
-        for lang, label in name.items():
-            if label is None:
-                continue
-            if isinstance(label, list):
-                for lab in label:
-                    label_rows.append(
-                        {"id": entry_id, "taxonomy": taxonomy_name, "lang": lang, "label": str(lab), "is_synonym": False}
-                    )
-            else:
-                label_rows.append(
-                    {"id": entry_id, "taxonomy": taxonomy_name, "lang": lang, "label": str(label), "is_synonym": False}
-                )
-
-        # synonyms: 0..n labels par langue
-        for lang, syns in synonyms.items():
-            if not syns:
-                continue
-            if isinstance(syns, str):
-                syns = [syns]
-            canonical = name.get(lang)
-            for syn in syns:
-                if syn is None:
-                    continue
-                if canonical is not None and syn == canonical:
-                    continue  # déjà compté comme label canonique
-                label_rows.append(
-                    {"id": entry_id, "taxonomy": taxonomy_name, "lang": lang, "label": str(syn), "is_synonym": True}
-                )
-
-    entries = pl.DataFrame(
-        entry_rows,
-        schema={
-            "id": pl.String,
-            "taxonomy": pl.String,
-            "prefix": pl.String,
-            "parents": pl.List(pl.String),
-            "n_parents": pl.UInt32,
-            "n_children": pl.UInt32,
-            "n_languages": pl.UInt32,
-            "has_wikidata": pl.Boolean,
-            "is_protected_name": pl.Boolean,
-        },
-    )
-    labels = pl.DataFrame(
-        label_rows,
-        schema={
-            "id": pl.String,
-            "taxonomy": pl.String,
-            "lang": pl.String,
-            "label": pl.String,
-            "is_synonym": pl.Boolean,
-        },
-    )
+    entries = pl.DataFrame(entry_rows, schema=_ENTRIES_SCHEMA)
+    labels = pl.DataFrame(label_rows, schema=_LABELS_SCHEMA)
     return entries, labels
 
 

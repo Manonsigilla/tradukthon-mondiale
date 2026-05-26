@@ -18,6 +18,7 @@ import gc
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 import polars as pl
 
@@ -40,28 +41,69 @@ RAW = ROOT / "data" / "raw"
 CACHE = ROOT / "data" / "cache"
 CACHE.mkdir(parents=True, exist_ok=True)
 
-# Pays restreints pour éviter les explosions mémoire sur ingrédients.
-# Inclut tous les top pays OFF + les pays multilingues notables.
+# Countries we evaluate for fan-out-heavy metrics. Keeps the cross-product
+# (products × countries × ingredients) within RAM on a laptop.
 USEFUL_COUNTRIES = list(COUNTRY_LANGUAGES.keys())
 
 
+# ---------------------------------------------------------------------------
+# Logging + caching helpers
+# ---------------------------------------------------------------------------
+
 def need(path: Path, force: bool) -> bool:
+    """Return True if the cache file must be (re)computed."""
     if force or not path.exists():
         return True
     print(f"[skip] {path.name} existe déjà", flush=True)
     return False
 
 
-def step(name: str):
+def step(name: str) -> float:
+    """Print a 'starting' line and return the start time."""
     t = time.time()
     print(f"[..] {name}", flush=True)
     return t
 
 
-def done(t: float, name: str, df: pl.DataFrame | None = None):
+def done(t: float, name: str, df: pl.DataFrame | None = None) -> None:
+    """Print a 'done' line with elapsed time and (optional) row count."""
     extra = f" ({df.height} rows)" if df is not None else ""
     print(f"[ok] {name} — {time.time() - t:.1f}s{extra}", flush=True)
 
+
+def run_step(
+    label: str,
+    filename: str,
+    compute: Callable[[], pl.DataFrame],
+    force: bool,
+    *,
+    add_iso3: bool = False,
+) -> None:
+    """Compute a metric, persist it to data/cache/, log timing.
+
+    Idempotent: skips the computation if the cache file already exists
+    (unless ``force=True``). When ``add_iso3=True``, derives an ISO-3
+    country code column for Plotly choropleth maps.
+    """
+    path = CACHE / filename
+    if not need(path, force):
+        return
+    t = step(label)
+    df = compute()
+    if add_iso3:
+        df = df.with_columns(
+            pl.col("country")
+            .map_elements(country_tag_to_iso, return_dtype=pl.String)
+            .alias("iso3")
+        )
+    df.write_parquet(path)
+    done(t, label, df)
+    gc.collect()
+
+
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     p = argparse.ArgumentParser()
@@ -82,14 +124,15 @@ def main() -> None:
 
     print("\n== Métriques côté produits ==", flush=True)
 
-    def fresh_lf():
-        # un nouveau LazyFrame à chaque étape — pas plus coûteux (lazy)
+    # A fresh LazyFrame each step is cheap (lazy) and avoids any state leaks.
+    def fresh_lf() -> pl.LazyFrame:
         return scan_products(RAW / "food.parquet")
 
-    # --- products_by_country
-    if need(CACHE / "products_by_country.parquet", force):
-        t = step("products_by_country")
-        by_country = (
+    # products per country (used by 02-coverage)
+    run_step(
+        "products_by_country",
+        "products_by_country.parquet",
+        lambda: (
             fresh_lf()
             .select("code", "countries_tags")
             .filter(pl.col("countries_tags").is_not_null())
@@ -99,56 +142,45 @@ def main() -> None:
             .agg(pl.col("code").n_unique().alias("n_products"))
             .sort("n_products", descending=True)
             .collect()
-        )
-        by_country.write_parquet(CACHE / "products_by_country.parquet")
-        done(t, "by_country", by_country)
-        del by_country
-        gc.collect()
+        ),
+        force,
+    )
 
-    # --- B1
-    if need(CACHE / "b1_labeling_rate.parquet", force):
-        t = step("B1 country_labeling_rate (categories)")
-        r = country_labeling_rate(fresh_lf(), "categories_tags", min_products=200)
-        r = r.with_columns(
-            pl.col("country").map_elements(country_tag_to_iso, return_dtype=pl.String).alias("iso3")
-        )
-        r.write_parquet(CACHE / "b1_labeling_rate.parquet")
-        done(t, "B1", r)
-        del r
-        gc.collect()
+    # B1: labeling rate
+    run_step(
+        "B1 country_labeling_rate (categories)",
+        "b1_labeling_rate.parquet",
+        lambda: country_labeling_rate(fresh_lf(), "categories_tags", min_products=200),
+        force,
+        add_iso3=True,
+    )
 
-    # --- B2 categories
-    if need(CACHE / "b2_canonical_cat.parquet", force):
-        t = step("B2 canonical (categories)")
-        cov_cat = country_tag_canonical_coverage(fresh_lf(), cat_e, "categories_tags", min_products=200)
-        cov_cat = cov_cat.with_columns(
-            pl.col("country").map_elements(country_tag_to_iso, return_dtype=pl.String).alias("iso3")
-        )
-        cov_cat.write_parquet(CACHE / "b2_canonical_cat.parquet")
-        done(t, "B2 cat", cov_cat)
-        del cov_cat
-        gc.collect()
+    # B2: canonical coverage (categories)
+    run_step(
+        "B2 canonical (categories)",
+        "b2_canonical_cat.parquet",
+        lambda: country_tag_canonical_coverage(fresh_lf(), cat_e, "categories_tags", min_products=200),
+        force,
+        add_iso3=True,
+    )
 
-    # --- B2 ingredients : SKIP (explode ingrédients × pays sature la RAM
-    #     sur ce dataset 7 Go). On garde la métrique pour les catégories
-    #     uniquement, qui est l'angle critique pour le rapport.
+    # B2 ingredients is skipped on purpose: the explode (products × countries
+    # × ingredients) saturates RAM on a 7 GB parquet. The same analysis is
+    # available via the Superset/DuckDB SQL (cf. sql/ + report/04-superset.qmd).
     print("[skip] B2 ingredients (volontairement, RAM)", flush=True)
 
-    # --- C cat
-    if need(CACHE / "c_deficit_cat.parquet", force):
-        t = step("C deficit (categories)")
-        def_cat = country_language_deficit(fresh_lf(), cat_l, "categories_tags", COUNTRY_LANGUAGES, min_products=500)
-        def_cat.write_parquet(CACHE / "c_deficit_cat.parquet")
-        done(t, "C cat", def_cat)
-        del def_cat
-        gc.collect()
+    # C: country × language deficit
+    run_step(
+        "C deficit (categories)",
+        "c_deficit_cat.parquet",
+        lambda: country_language_deficit(fresh_lf(), cat_l, "categories_tags", COUNTRY_LANGUAGES, min_products=500),
+        force,
+    )
 
-    # --- C ingredients : SKIP (idem B2 ing — l'explode ingrédients × pays
-    #     fait segfault sur 7 Go de parquet). Le déficit catégories suffit
-    #     pour le récit principal.
+    # C ingredients: same RAM issue as B2 ingredients, see Superset.
     print("[skip] C ingredients (volontairement, RAM)", flush=True)
 
-    # --- D1 summary
+    # D1 summary: a dict, not a DataFrame, so we handle it inline.
     if need(CACHE / "d1_summary_cat.parquet", force):
         t = step("D1 used_entries_summary (categories)")
         s = used_entries_summary(fresh_lf(), cat_e, "categories_tags")
@@ -156,34 +188,33 @@ def main() -> None:
         done(t, "D1 summary")
         gc.collect()
 
-    # --- D1 dead
-    if need(CACHE / "d1_dead_cat.parquet", force):
-        t = step("D1 dead_entries (categories)")
-        d = dead_entries(fresh_lf(), cat_e, "categories_tags")
-        d.write_parquet(CACHE / "d1_dead_cat.parquet")
-        done(t, "D1 dead cat", d)
-        del d
-        gc.collect()
+    # D1 dead entries (taxonomy entries never used by any product)
+    run_step(
+        "D1 dead_entries (categories)",
+        "d1_dead_cat.parquet",
+        lambda: dead_entries(fresh_lf(), cat_e, "categories_tags"),
+        force,
+    )
 
-    # --- D2 cat global (restreint pays utiles pour économiser RAM)
-    if need(CACHE / "d2_unknown_cat.parquet", force):
-        t = step("D2 unknown_tags (categories) - restreint pays")
-        u = unknown_tags(fresh_lf(), cat_e, "categories_tags", top_n=50, country_filter=USEFUL_COUNTRIES)
-        u.write_parquet(CACHE / "d2_unknown_cat.parquet")
-        done(t, "D2 cat", u)
-        del u
-        gc.collect()
+    # D2 unknown tags (categories) — restricted to useful countries to keep
+    # the cross-product manageable.
+    run_step(
+        "D2 unknown_tags (categories) - restreint pays",
+        "d2_unknown_cat.parquet",
+        lambda: unknown_tags(fresh_lf(), cat_e, "categories_tags", top_n=50, country_filter=USEFUL_COUNTRIES),
+        force,
+    )
 
-    # --- D2 ingredients : SKIP (RAM, voir B2 ing)
+    # D2 ingredients: skipped (RAM, see B2 ing).
     print("[skip] D2 ingredients (volontairement, RAM)", flush=True)
 
-    # --- D2 par pays (pour le dropdown)
+    # D2 per-country (feeds the Plotly dropdown on 03-gaps).
     if need(CACHE / "d2_unknown_by_country.parquet", force):
         top_countries = [
             "en:france", "en:united-states", "en:germany", "en:spain", "en:italy",
             "en:united-kingdom", "en:belgium", "en:switzerland", "en:netherlands", "en:poland",
         ]
-        per_country = []
+        per_country: list[pl.DataFrame] = []
         for c in top_countries:
             t = step(f"D2 by_country {c}")
             df = unknown_tags_by_country(fresh_lf(), cat_e, "categories_tags", c, top_n=20)

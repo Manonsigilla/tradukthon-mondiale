@@ -44,33 +44,6 @@ def scan_products(parquet_path: str | Path, columns: list[str] | None = None) ->
     return lf.select(cols)
 
 
-def products_by_country(lf: pl.LazyFrame) -> pl.DataFrame:
-    """Nombre de produits par pays (explose countries_tags)."""
-    return (
-        lf.select("code", "countries_tags")
-        .filter(pl.col("countries_tags").is_not_null())
-        .explode("countries_tags")
-        .filter(pl.col("countries_tags").is_not_null())
-        .group_by("countries_tags")
-        .agg(pl.col("code").n_unique().alias("n_products"))
-        .sort("n_products", descending=True)
-        .collect()
-    )
-
-
-def products_by_lang(lf: pl.LazyFrame) -> pl.DataFrame:
-    """Nombre de produits par langue principale."""
-    return (
-        lf.select("lang")
-        .filter(pl.col("lang").is_not_null())
-        .group_by("lang")
-        .len()
-        .rename({"len": "n_products"})
-        .sort("n_products", descending=True)
-        .collect()
-    )
-
-
 def explode_tags(
     lf: pl.LazyFrame,
     tag_col: str,
@@ -105,10 +78,3 @@ def explode_tags(
         .rename({country_col: "country", tag_col: "tag"})
     )
     return out
-
-
-def schema_summary(parquet_path: str | Path) -> pl.DataFrame:
-    """Liste toutes les colonnes du parquet et leur type, pour exploration."""
-    lf = pl.scan_parquet(str(parquet_path))
-    schema = lf.collect_schema()
-    return pl.DataFrame({"column": list(schema.names()), "dtype": [str(d) for d in schema.dtypes()]})

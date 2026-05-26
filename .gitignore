@@ -70,3 +70,5 @@ $RECYCLE.BIN/
 *.log
 *.tmp
 *.bak
+
+/.quarto/

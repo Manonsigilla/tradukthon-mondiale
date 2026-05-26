@@ -32,6 +32,19 @@ from src.loader import explode_tags
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _canonical_id_set(entries: pl.DataFrame) -> set[str]:
+    """Return the set of canonical taxonomy ids for fast O(1) membership checks.
+
+    Used by every metric that needs to distinguish canonical tags (present in
+    the taxonomy file) from unknown ones in the products dataset.
+    """
+    return set(entries["id"].to_list())
+
+
+# ---------------------------------------------------------------------------
 # B1. Taux d'étiquetage des produits par pays
 # ---------------------------------------------------------------------------
 
@@ -94,7 +107,7 @@ def country_tag_canonical_coverage(
 
     Returns: country, n_products, n_tag_occurrences, n_canonical, pct_canonical
     """
-    canonical_ids = set(entries["id"].to_list())
+    canonical_ids = _canonical_id_set(entries)
 
     tags = explode_tags(products, tag_col, country_filter=country_filter).collect()
 
@@ -116,47 +129,11 @@ def country_tag_canonical_coverage(
 
 
 # ---------------------------------------------------------------------------
-# B. Complétude multilingue (taxonomie seule, pas besoin du parquet)
-# ---------------------------------------------------------------------------
-
-def multilingual_completeness_matrix(labels: pl.DataFrame) -> pl.DataFrame:
-    """Matrice large entry × langue (booléen).
-
-    Utile pour la heatmap et pour identifier les entrées orphelines par langue.
-    """
-    return (
-        labels.select("id", "lang")
-        .unique()
-        .with_columns(pl.lit(1).alias("present"))
-        .pivot(index="id", on="lang", values="present", aggregate_function="first")
-        .fill_null(0)
-    )
-
-
-def language_completeness_score(labels: pl.DataFrame, entries: pl.DataFrame) -> pl.DataFrame:
-    """Pour chaque langue: % d'entrées couvertes + score 'qualité'
-    (présence de synonymes en plus du label canonique).
-    """
-    n_entries = entries.height
-    per_lang_entries = (
-        labels.group_by("lang")
-        .agg(
-            pl.col("id").n_unique().alias("n_entries_covered"),
-            (~pl.col("is_synonym")).sum().alias("n_canonical_labels"),
-            pl.col("is_synonym").sum().alias("n_synonym_labels"),
-        )
-        .with_columns(
-            (pl.col("n_entries_covered") / n_entries * 100).alias("pct_coverage"),
-            (pl.col("n_synonym_labels") / pl.col("n_canonical_labels")).alias("synonyms_per_canonical"),
-        )
-        .sort("pct_coverage", descending=True)
-    )
-    return per_lang_entries
-
-
-# ---------------------------------------------------------------------------
 # C. Déficit pays × langue (la métrique star)
 # ---------------------------------------------------------------------------
+# Note: metric A (taxonomy self-completeness) is implemented in
+# src/taxonomy.py::language_coverage, not here. It only depends on the
+# taxonomy files, so it lives in the taxonomy module.
 
 def country_language_deficit(
     products: pl.LazyFrame,
@@ -186,7 +163,8 @@ def country_language_deficit(
     country, lang, n_entries_used, n_translated, n_missing, pct_deficit
     """
     # 1. quels ids canoniques sont utilisés dans chaque pays ?
-    canonical_ids = labels["id"].unique().to_list()
+    # (labels has the same "id" column as entries, so the helper works here too)
+    canonical_ids = _canonical_id_set(labels.select("id").unique())
     used = (
         explode_tags(products, tag_col, country_filter=list(country_languages.keys()))
         .filter(pl.col("tag").is_in(canonical_ids))
@@ -252,6 +230,7 @@ def dead_entries(
         .rename({tag_col: "id"})
         .collect()
     )
+    # build a set for fast .is_in() membership check
     used_set = set(used_ids["id"].to_list())
     return (
         entries.filter(~pl.col("id").is_in(list(used_set)))
@@ -276,7 +255,7 @@ def used_entries_summary(
         .rename({tag_col: "id", "len": "n_products"})
         .collect()
     )
-    canonical_ids = set(entries["id"].to_list())
+    canonical_ids = _canonical_id_set(entries)
     used_canonical = used_counts.filter(pl.col("id").is_in(list(canonical_ids)))
     n_used = used_canonical.height
     n_total = entries.height
@@ -305,7 +284,7 @@ def unknown_tags(
 
     Returns: tag, lang_prefix, n_occurrences, n_countries, top_country
     """
-    canonical_ids = set(entries["id"].to_list())
+    canonical_ids = _canonical_id_set(entries)
     tags = explode_tags(products, tag_col, country_filter=country_filter).collect()
     unknown = tags.filter(~pl.col("tag").is_in(canonical_ids))
 
@@ -333,7 +312,7 @@ def unknown_tags_by_country(
     top_n: int = 30,
 ) -> pl.DataFrame:
     """Top tags inconnus pour un pays spécifique."""
-    canonical_ids = set(entries["id"].to_list())
+    canonical_ids = _canonical_id_set(entries)
     tags = explode_tags(products, tag_col).filter(pl.col("country") == country).collect()
     return (
         tags.filter(~pl.col("tag").is_in(canonical_ids))
