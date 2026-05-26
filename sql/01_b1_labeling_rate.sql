@@ -16,7 +16,7 @@ WITH exploded AS (
     SELECT
         code,
         unnest(countries_tags) AS country,
-        len(coalesce(categories_tags, [])) > 0 AS has_category
+        (categories_tags IS NOT NULL AND len(categories_tags) > 0) AS has_category
     FROM products
     WHERE countries_tags IS NOT NULL
 ),

@@ -1,9 +1,9 @@
 """Télécharge les sources nécessaires au rapport (taxonomies + parquet OFF).
 
 Usage:
-    python scripts/download_data.py            # tout
-    python scripts/download_data.py taxonomies # seulement les taxonomies
-    python scripts/download_data.py parquet    # seulement le parquet (~2 Go)
+    python scripts/download_data.py            # tout (~7 Go)
+    python scripts/download_data.py taxonomies # seulement les taxonomies (~13 Mo)
+    python scripts/download_data.py parquet    # seulement le parquet (~7 Go)
 
 Tous les fichiers sont placés sous data/raw/. Idempotent: ne re-télécharge pas
 ce qui est déjà présent (sauf si --force).
@@ -63,7 +63,7 @@ def main() -> int:
             download(url, RAW_DIR / fname, force=args.force)
 
     if args.target in ("all", "parquet"):
-        print("\n--- Parquet OFF (~2 Go, peut prendre plusieurs minutes) ---")
+        print("\n--- Parquet OFF (~7 Go, peut prendre plusieurs minutes) ---")
         download(PARQUET_URL, RAW_DIR / PARQUET_NAME, force=args.force)
 
     return 0

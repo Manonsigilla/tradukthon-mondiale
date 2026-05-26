@@ -56,9 +56,12 @@ dans Superset.
 
 ```bash
 pip install -e .
-python scripts/download_data.py           # taxonomies + parquet
+python scripts/download_data.py    # taxonomies + parquet OFF (~7 Go)
+python scripts/precompute.py       # calcule les métriques → data/cache/
 quarto render
+quarto preview                     # serveur local
 ```
 
-Toutes les données brutes sont téléchargées dans `data/raw/` ; le rapport est entièrement
-reproductible à partir des sources OFF publiques.
+Toutes les données brutes sont téléchargées dans `data/raw/` ; les pages Quarto
+lisent les résultats déjà calculés depuis `data/cache/` (rendus quasi-instantanés).
+Le rapport est entièrement reproductible à partir des sources OFF publiques.

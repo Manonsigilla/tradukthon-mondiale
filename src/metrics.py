@@ -403,7 +403,7 @@ COUNTRY_LANGUAGES: dict[str, list[str]] = {
 
 
 def country_tag_to_iso(country_tag: str) -> str | None:
-    """`en:france` -> 'FR' via pycountry. Fragile mais utile pour les cartes."""
+    """`en:france` -> 'FRA' (ISO-3) via pycountry. Utile pour les choroplèthes Plotly."""
     try:
         import pycountry
     except ImportError:

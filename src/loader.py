@@ -1,6 +1,6 @@
 """Lecture du parquet Open Food Facts (lazy + projection).
 
-Le parquet OFF (~2 Go, ~4 M produits) contient des dizaines de colonnes.
+Le parquet OFF (~7 Go, ~4 M produits) contient une centaine de colonnes.
 On ne charge QUE celles utiles à l'analyse de couverture taxonomique :
 
     code              : identifiant produit
@@ -8,7 +8,7 @@ On ne charge QUE celles utiles à l'analyse de couverture taxonomique :
     countries_tags    : list[str], pays où le produit est vendu (ex: 'en:france')
     categories_tags   : list[str], ex: 'en:beverages'
     ingredients_tags  : list[str], ex: 'en:water'
-    languages_codes   : list[str] ou struct, langues détectées sur le produit
+    languages_tags    : list[str], langues détectées sur le produit
 
 Toutes les fonctions renvoient des LazyFrame quand possible, pour permettre
 au moteur d'optimiser les projections/filtres avant collect().
