@@ -15,7 +15,7 @@ WITH exploded AS (
         code,
         unnest(countries_tags)  AS country,
         unnest(categories_tags) AS category_tag
-    FROM products
+    FROM food_products
     WHERE countries_tags IS NOT NULL
       AND categories_tags IS NOT NULL
 ),

@@ -17,7 +17,7 @@ WITH exploded AS (
         code,
         unnest(countries_tags) AS country,
         (categories_tags IS NOT NULL AND len(categories_tags) > 0) AS has_category
-    FROM products
+    FROM food_products
     WHERE countries_tags IS NOT NULL
 ),
 agg AS (

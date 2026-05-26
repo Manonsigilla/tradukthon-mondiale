@@ -19,7 +19,7 @@ WITH used_in_country AS (
     SELECT DISTINCT
         unnest(countries_tags)  AS country,
         unnest(categories_tags) AS entry_id
-    FROM products
+    FROM food_products
     WHERE categories_tags IS NOT NULL
       AND countries_tags  IS NOT NULL
 ),

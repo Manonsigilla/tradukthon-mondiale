@@ -19,7 +19,7 @@ WITH used AS (
         code,
         unnest(countries_tags)  AS country,
         unnest(categories_tags) AS tag
-    FROM products
+    FROM food_products
     WHERE categories_tags IS NOT NULL
       AND countries_tags  IS NOT NULL
 )

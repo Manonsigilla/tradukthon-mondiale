@@ -17,7 +17,7 @@ WITH first_category AS (
         code,
         lang AS product_lang,
         categories_tags[1] AS main_category
-    FROM products
+    FROM food_products
     WHERE categories_tags IS NOT NULL
       AND len(categories_tags) > 0
       AND lang IS NOT NULL

@@ -12,7 +12,7 @@ WITH per_country AS (
     SELECT
         unnest(countries_tags)            AS country,
         upper(nutriscore_grade)           AS grade
-    FROM products
+    FROM food_products
     WHERE countries_tags  IS NOT NULL
       AND nutriscore_grade IN ('a','b','c','d','e')
 )
