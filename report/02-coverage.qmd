@@ -150,14 +150,6 @@ tags y sont propres ; plus il est rouge, plus les contributeurs y ont
 inventé des tags hors taxonomie.
 :::
 
-::: {.callout-note appearance="simple"}
-**Note sur les ingrédients :** sur le dataset complet (~4 M produits × ~40
-ingrédients chacun), la métrique B2 ingrédients dépasse la RAM du run de
-calcul. Elle est intentionnellement non affichée ici. La même question est
-abordée dans Superset (cf. [Bridge Superset](04-superset.qmd)) où DuckDB
-gère mieux le double-explode pays × ingrédients en streaming.
-:::
-
 ### Pays avec le plus de tags hors taxonomie
 
 ```{python}

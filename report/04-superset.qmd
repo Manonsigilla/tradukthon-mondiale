@@ -1,6 +1,6 @@
 ---
-title: "Du rapport au tableau de bord : Superset"
-subtitle: "Le défi 5 résolu — un dashboard public, prêt à l'emploi pour la communauté OFF"
+title: "Le défi 5 — un dashboard Superset public"
+subtitle: "Ce qu'on a construit côté BI et ce que ça raconte"
 ---
 
 ::: {.callout-important appearance="simple"}
@@ -8,83 +8,51 @@ subtitle: "Le défi 5 résolu — un dashboard public, prêt à l'emploi pour la
 [sql.openfoodfacts.org/superset/dashboard/p/Dk4w0Y5oAn5/](https://sql.openfoodfacts.org/superset/dashboard/p/Dk4w0Y5oAn5/)
 :::
 
-## Pourquoi un dashboard Superset ?
+## Ce qu'on a fait
 
-Ce rapport Quarto explique **pourquoi** et **comment** mesurer la couverture
-des taxonomies OFF. Mais un Quarto reste un livrable de R&D : il faut être
-à l'aise avec Python ou Markdown pour le faire évoluer.
+Le brief du défi 5 demandait de **construire un tableau de bord sur Superset**,
+l'outil de BI open source utilisé par Open Food Facts
+([sql.openfoodfacts.org](https://sql.openfoodfacts.org)). Pour ne pas faire un
+dashboard générique de plus, on a choisi d'**aligner Superset sur les
+métriques du notebook Quarto** : mêmes questions, mêmes chiffres, deux
+audiences différentes.
 
-**Apache Superset** ([sql.openfoodfacts.org](https://sql.openfoodfacts.org))
-est l'outil de BI open source **déjà utilisé par OFF** qui permet à
-**n'importe quel contributeur** — pas seulement les développeurs — de :
+Concrètement, on a :
 
-- Lancer des requêtes SQL sur le parquet OFF (via DuckDB)
-- Construire des tableaux de bord visuels
-- Partager des vues en **lien public**, sans installation
+1. **Écrit 6 requêtes SQL DuckDB** versionnées dans
+   [`sql/`](https://github.com/Manonsigilla/tradukthon-mondiale/tree/main/sql),
+   qui reproduisent les métriques A/B/C/D de ce rapport directement sur la
+   table `food_products` de sql.openfoodfacts.org
+2. **Construit 3 charts** dans Superset à partir de ces requêtes
+3. **Assemblé un dashboard public**, ouvert au jury sans création de compte
 
-Le défi 5 invite explicitement à proposer un angle de travail. **Notre angle :
-faire dialoguer le notebook Quarto avec un dashboard Superset**, autour des
-mêmes métriques. Une seule logique métier, deux outils, deux audiences.
-
-## L'architecture en pratique
+## L'architecture
 
 ```{mermaid}
 flowchart LR
     A[Parquet OFF<br/>4 M+ produits] --> B[sql.openfoodfacts.org<br/>DuckDB engine]
-    B --> C[6 requêtes SQL DuckDB<br/>livrées dans sql/]
+    B --> C[6 requêtes SQL<br/>versionnées dans sql/]
     C --> D[Charts Superset]
     D --> E[Dashboard public<br/>partageable au jury / à OFF]
-    F[src/metrics.py<br/>Quarto] -.<br/>même logique.-> C
+    F[src/metrics.py<br/>Quarto] -.<br/>même logique métier.-> C
 ```
 
-Les 6 requêtes SQL sont versionnées dans le dossier [`sql/`](https://github.com/Manonsigilla/tradukthon-mondiale/tree/main/sql)
-du dépôt. Le code Python du notebook Quarto et les SQL produisent
-**exactement les mêmes chiffres**, ce qui rend le récit cohérent quelle que
-soit l'entrée du jury.
+Les requêtes SQL et le code Python du notebook **produisent exactement les
+mêmes chiffres**. Une seule logique métier, deux outils.
 
-## Ce qu'on a livré
+## Chart 1 — Classement Nutri-Score par pays
 
-Notre dashboard public contient **3 charts** sur les 6 requêtes prêtes.
-
-### Chart 1 — Classement Nutri-Score par pays
+L'exemple direct du brief OFF (« *classement des pays par Nutri-Score ?* »).
+Pour chaque pays ayant au moins 1 000 produits scorés, on calcule la
+répartition A/B/C/D/E et un score moyen pondéré (A=1, E=5, plus bas = mieux).
 
 Requête : [`sql/06_b1_nutriscore_bonus.sql`](https://github.com/Manonsigilla/tradukthon-mondiale/blob/main/sql/06_b1_nutriscore_bonus.sql)
-— réponse directe à l'exemple du brief OFF (« *classement des pays par Nutri-Score ?* »).
 
 ![Chart 1 — Classement Nutri-Score par pays (Superset)](images/superset-01-nutriscore.png)
 
-### Chart 2 — Taux d'étiquetage par pays (B1)
+**Ce que ça raconte** :
 
-Requête : [`sql/01_b1_labeling_rate.sql`](https://github.com/Manonsigilla/tradukthon-mondiale/blob/main/sql/01_b1_labeling_rate.sql)
-— version Superset de notre **métrique B1** : combien de produits par pays ont
-au moins une catégorie renseignée. On retrouve les mêmes pays mal étiquetés
-que dans la [page B](02-coverage.qmd).
-
-![Chart 2 — Taux d'étiquetage des produits par pays (Superset)](images/superset-02-labeling-rate.png)
-
-### Chart 3 — Top catégories utilisées par pays
-
-Requête : [`sql/02_top_categories_by_country.sql`](https://github.com/Manonsigilla/tradukthon-mondiale/blob/main/sql/02_top_categories_by_country.sql)
-— pour chaque pays du top 10 OFF, les 30 catégories les plus utilisées par
-les produits qui y sont vendus. Complète notre métrique **D2** côté
-exploratoire.
-
-![Chart 3 — Top catégories utilisées par pays (Superset)](images/superset-03-top-categories.png)
-
-::: {.callout-note appearance="simple"}
-Les 3 autres requêtes (KPI complétude globale, déficit pays × langue,
-candidats à ajouter à la taxonomie) sont prêtes dans `sql/` mais nécessitent
-de joindre la table `food_products` à 3 datasets dérivés de la taxonomie OFF
-(`data/exports/*.csv`). On peut les brancher en quelques minutes une fois
-les CSV publiés publiquement.
-:::
-
-## Quelques chiffres extraits du dashboard
-
-**Nutri-Score** (requête `06`) — top des pays avec ≥ 1 000 produits scorés,
-classés par score moyen (1 = A, 5 = E, plus bas = mieux) :
-
-| Pays | Produits scorés | Score moyen | % A/B (healthy) |
+| Pays | Produits scorés | Score moyen | % healthy (A/B) |
 |---|---:|---:|---:|
 | 🥇 Brésil | 4 646 | **3,01** | **40,2 %** |
 | 🥈 Finlande | 5 442 | 3,11 | 33,1 % |
@@ -94,87 +62,89 @@ classés par score moyen (1 = A, 5 = E, plus bas = mieux) :
 | Allemagne | 119 144 | 3,35 | 26,0 % |
 | Italie | 91 635 | 3,38 | 26,8 % |
 
-Lecture : à volume comparable, les pays nordiques et la péninsule ibérique
-proposent en moyenne des produits **mieux notés** que l'Europe de l'Ouest.
+À volume comparable, **les pays nordiques et la péninsule ibérique** affichent
+en moyenne de meilleurs Nutri-Scores que l'Europe de l'Ouest. Le **Brésil**
+sort en tête sur la part de produits A ou B (40 %), un signal intéressant
+pour l'équipe OFF.
 
-## Quarto vs. Superset : deux audiences, un récit
+## Chart 2 — Taux d'étiquetage par pays (métrique B1)
 
-| | **Quarto** (ce notebook) | **Superset** (dashboard) |
+Combien de produits, dans chaque pays OFF, ont au moins une catégorie
+renseignée par les contributeurs ? C'est la version Superset de notre
+[métrique B1](02-coverage.qmd) : un signal **communautaire** (pression des
+bénévoles locaux), indépendant de la qualité de la taxonomie elle-même.
+
+Requête : [`sql/01_b1_labeling_rate.sql`](https://github.com/Manonsigilla/tradukthon-mondiale/blob/main/sql/01_b1_labeling_rate.sql)
+
+![Chart 2 — Taux d'étiquetage des produits par pays (Superset)](images/superset-02-labeling-rate.png)
+
+**Ce que ça raconte** : les barres du graphique varient de ~10 % à ~60 %, ce
+qui confirme l'écart énorme de **pression communautaire** entre pays. Le top
+contient les pays européens à forte communauté (France, Espagne, Allemagne,
+Royaume-Uni). En bas, on retrouve les pays où la base OFF existe mais où
+peu de contributeurs prennent le temps d'ajouter les catégories.
+
+Le chart est trié par volume de produits par défaut, mais on peut cliquer
+sur l'en-tête de colonne `pct_tagged` pour voir directement les pays les
+plus / les moins étiquetés.
+
+## Chart 3 — Top catégories utilisées par pays
+
+Pour chaque pays du top 10 OFF (FR, US, DE, ES, IT, UK, BE, CH, NL, PL), on
+liste les **30 catégories les plus utilisées** par les produits qui y sont
+vendus. C'est un complément à la métrique [D2 du Quarto](03-gaps.qmd) :
+plutôt que de regarder les tags **inconnus** par pays, on regarde ici les
+tags **connus** dominants.
+
+Requête : [`sql/02_top_categories_by_country.sql`](https://github.com/Manonsigilla/tradukthon-mondiale/blob/main/sql/02_top_categories_by_country.sql)
+
+![Chart 3 — Top catégories utilisées par pays (Superset)](images/superset-03-top-categories.png)
+
+**Ce que ça raconte** : par exemple pour la **Belgique** (visible dans le
+screenshot), les catégories dominantes sont :
+
+| Rang | Catégorie | Produits belges concernés |
+|---:|---|---:|
+| 1 | `en:plant-based-foods-and-beverages` | 17 219 |
+| 2 | `en:snacks` | 7 683 |
+| 3 | `en:dairies` | 4 638 |
+| 4 | `en:meats-and-their-products` | 4 248 |
+| 5 | `en:beverages-and-beverages-preparations` | 2 691 |
+
+On peut filtrer chaque pays dans Superset en cliquant sur la colonne
+`country`. Cela donne une vue actionnable pour les contributeurs locaux :
+*« voici ce qui est utilisé dans ton pays, concentre tes efforts dessus »*.
+
+## Pourquoi Quarto **et** Superset ?
+
+|  | **Quarto** (ce notebook) | **Superset** (dashboard) |
 |---|---|---|
-| **Public** | Data scientists, équipe R&D OFF | Bénévoles OFF, équipe gouvernance |
-| **Format** | Rapport pédagogique, linéaire | Tableau exploratoire, par chart |
-| **Interactivité** | Plotly intégré (ex. menu déroulant page 03) | Tri/filtre par colonne dans chaque chart |
-| **Évolutivité** | Demande Python + Quarto | Drag & drop SQL |
-| **Reproductibilité** | `quarto render` localement | Lien public, navigateur |
+| Public | Data scientists, équipe R&D OFF | Bénévoles OFF, gouvernance |
+| Format | Rapport linéaire, pédagogique | Vue tabulaire et graphique, exploratoire |
+| Interactivité | Plotly intégré (cf. menu déroulant page [Trous & actions](03-gaps.qmd)) | Tri / filtre par colonne dans chaque chart |
+| Évolutivité | Python + Quarto | Drag & drop SQL |
+| Partage | `quarto render` → site statique | Lien public, navigateur |
 
-C'est cette **complémentarité** qui fait la valeur ajoutée du double livrable
-pour OFF.
+Le notebook **explique la méthodologie** et publie les chiffres clés. Le
+dashboard **opérationnalise ces mêmes chiffres** dans l'environnement de
+travail quotidien des contributeurs OFF, sans qu'ils aient besoin
+d'installer quoi que ce soit.
 
-## Mode d'emploi : reproduire le dashboard
+## Les 3 charts en plus, déjà prêts
 
-### 1. Préparer les datasets (Quarto-side)
+Trois requêtes supplémentaires sont versionnées dans
+[`sql/`](https://github.com/Manonsigilla/tradukthon-mondiale/tree/main/sql)
+pour étendre le dashboard quand on aura le temps :
 
-```bash
-python scripts/export_for_superset.py
-```
+| # | Requête | Métrique Quarto | Viz Superset visée |
+|---|---|---|---|
+| 4 | `03_d2_unknown_tag_candidates.sql` | D2 — tags à ajouter | Bar Chart |
+| 5 | `04_c_deficit_country_language.sql` | C — déficit pays × langue | Pivot Heatmap |
+| 6 | `05_global_completeness_kpi.sql` | KPI complétude | Big Number |
 
-Produit dans `data/exports/` :
-
-- `taxonomy_categories.csv` — 14 437 lignes
-- `taxonomy_labels.csv` — 59 614 paires `(id, lang)`
-- `country_languages.csv` — 69 paires `(pays, langue officielle)`
-
-### 2. Se connecter à Superset
-
-1. Compte sur [fr.openfoodfacts.org](https://fr.openfoodfacts.org)
-2. Connexion sur [sql.openfoodfacts.org](https://sql.openfoodfacts.org)
-3. Choisir la database **`duckdb - Food products, food prices`** (la table
-   principale s'appelle `food_products`)
-
-### 3. Exécuter les requêtes
-
-Pour chaque fichier `sql/*.sql` :
-
-1. **SQL → SQL Lab → SQL Editor**
-2. Database : `duckdb - Food products, food prices`
-3. Coller la requête, **Run**
-4. **Save → Save as new** → titre + type de viz adapté
-
-### 4. Assembler le dashboard
-
-1. **Dashboards → + Dashboard**
-2. Drag-and-drop des charts depuis le panneau de droite
-3. (Optionnel) **Publish** pour générer un lien public
-
-## Limitation honnête : les filtres natifs
-
-Les **Dashboard Filters** de Superset ne s'appliquent pas automatiquement
-aux charts construits à partir d'une requête SQL Lab utilisant `unnest(...)`
-sur un tableau (cas typique des `countries_tags` OFF). Superset n'arrive
-pas à pousser le `WHERE` à travers le `unnest`.
-
-Solutions possibles, non implémentées ici par souci de temps :
-
-- Créer un **dataset Superset natif** (vue matérialisée) par-dessus la
-  requête, puis attacher les filtres dessus
-- Ou utiliser des **URL parameters** Superset (`?country=en:france`)
-
-L'interactivité avancée vit donc **côté Quarto** (cf. menu déroulant Plotly
-sur la page [Trous & actions](03-gaps.qmd)). Le dashboard Superset est ici
-pensé comme un **livrable de référence partageable** plus que comme un
-explorateur dynamique.
-
-::: {.callout-tip}
-## Ce qui rend ce livrable sérieux
-
-- **Une seule source de vérité** : les métriques A/B/C/D vivent dans
-  [`src/metrics.py`](https://github.com/Manonsigilla/tradukthon-mondiale/blob/main/src/metrics.py)
-  côté Quarto et dans [`sql/`](https://github.com/Manonsigilla/tradukthon-mondiale/tree/main/sql)
-  côté Superset. Les deux produisent les mêmes chiffres.
-- **Reproductible bout-en-bout** : `pip install -e .` →
-  `python scripts/download_data.py` → `python scripts/precompute.py` →
-  `quarto render` (Quarto) ; copier-coller des `sql/*.sql` dans
-  `sql.openfoodfacts.org` (Superset).
-- **Actionable** : un bénévole OFF qui ouvre le dashboard voit
-  immédiatement où concentrer son effort.
-:::
+Elles nécessitent de joindre `food_products` avec 3 datasets dérivés de la
+taxonomie OFF
+([`data/exports/`](https://github.com/Manonsigilla/tradukthon-mondiale/tree/main/data/exports)).
+Le script
+[`scripts/export_for_superset.py`](https://github.com/Manonsigilla/tradukthon-mondiale/blob/main/scripts/export_for_superset.py)
+les produit en local, prêts à être uploadés comme datasets Superset.
